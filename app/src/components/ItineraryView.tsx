@@ -1,12 +1,38 @@
-import React from 'react';
-import { Clock, MapPin, Phone, ExternalLink, Compass } from 'lucide-react';
+import React, { useState } from 'react';
+import { Clock, MapPin, Phone, ExternalLink, Compass, Copy, Check } from 'lucide-react';
 import { ITINERARY_DATA, DayPlan, ItineraryItem } from '../data/tripData';
+import { PhoneCallModal } from './PhoneCallModal';
+import { showToast } from './Toast';
 
 interface Props {
   onGoToOrder?: (mealKey: string) => void;
 }
 
 export const ItineraryView: React.FC<Props> = ({ onGoToOrder }) => {
+  const [callingItem, setCallingItem] = useState<{ title: string; phone: string } | null>(null);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+
+  const handleCopyAddress = (id: string, text: string) => {
+    try {
+      navigator.clipboard.writeText(text);
+      setCopiedId(id);
+      showToast('✅ 地址已複製！可貼上至車機導航');
+      setTimeout(() => setCopiedId(null), 2000);
+    } catch {
+      showToast('⚠️ 複製失敗，請手動選取');
+    }
+  };
+
+  const handlePhoneClick = (title: string, phone: string) => {
+    const parts = phone.split('/').map((s) => s.trim()).filter(Boolean);
+    if (parts.length > 1) {
+      setCallingItem({ title, phone });
+    } else {
+      const clean = phone.replace(/[^\d+]/g, '');
+      window.location.href = `tel:${clean}`;
+    }
+  };
+
   return (
     <div>
       {/* 頂部標語 */}
@@ -100,41 +126,80 @@ export const ItineraryView: React.FC<Props> = ({ onGoToOrder }) => {
                         <Clock size={16} />
                         {item.time}
                       </div>
-                      <h4 style={{ fontSize: '1.1rem', fontWeight: 700, color: '#0f172a' }}>
+                      <h4 className="itinerary-card-title" style={{ fontSize: '1.15rem', fontWeight: 700, color: '#0f172a' }}>
                         {item.title}
                       </h4>
                     </div>
 
-                    {/* 地圖快速導航 */}
+                    {/* 地圖快速導航按鈕 */}
                     {item.mapQuery && (
                       <a
-                        href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
-                          item.mapQuery
+                        href={`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(
+                          item.location || item.mapQuery
                         )}`}
                         target="_blank"
                         rel="noreferrer"
                         className="btn btn-outline btn-sm"
-                        style={{ textDecoration: 'none', gap: '4px' }}
+                        style={{
+                          textDecoration: 'none',
+                          gap: '4px',
+                          borderColor: '#93c5fd',
+                          background: '#eff6ff',
+                          color: '#1d4ed8',
+                          fontWeight: 700
+                        }}
+                        title="開啟 Google 地圖進行導航"
                       >
-                        <Compass size={14} color="#2563eb" />
+                        <Compass size={16} color="#2563eb" />
                         導航
                       </a>
                     )}
                   </div>
 
-                  {/* 地點資訊 */}
+                  {/* 地點資訊與一鍵複製 */}
                   <div
                     style={{
                       display: 'flex',
                       alignItems: 'center',
-                      gap: '4px',
-                      color: '#475569',
-                      fontSize: '0.85rem',
-                      marginBottom: '10px'
+                      justifyContent: 'space-between',
+                      background: '#f8fafc',
+                      padding: '8px 10px',
+                      borderRadius: '10px',
+                      marginBottom: '10px',
+                      gap: '8px'
                     }}
                   >
-                    <MapPin size={14} color="#64748b" />
-                    {item.location}
+                    <div
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                        color: '#334155',
+                        fontSize: '0.85rem',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis'
+                      }}
+                    >
+                      <MapPin size={15} color="#64748b" style={{ flexShrink: 0 }} />
+                      <span style={{ wordBreak: 'break-all' }}>{item.location}</span>
+                    </div>
+                    <button
+                      onClick={() => handleCopyAddress(item.id, item.location)}
+                      className="btn btn-outline btn-sm"
+                      style={{
+                        padding: '4px 8px',
+                        fontSize: '0.75rem',
+                        flexShrink: 0,
+                        gap: '4px',
+                        background: copiedId === item.id ? '#dcfce7' : '#ffffff',
+                        borderColor: copiedId === item.id ? '#86efac' : '#cbd5e1',
+                        color: copiedId === item.id ? '#15803d' : '#475569'
+                      }}
+                      title="複製地址至剪貼簿，可貼至車機導航"
+                    >
+                      {copiedId === item.id ? <Check size={13} /> : <Copy size={13} />}
+                      {copiedId === item.id ? '已複製' : '複製'}
+                    </button>
                   </div>
 
                   {/* 電話與營業時間 */}
@@ -142,20 +207,40 @@ export const ItineraryView: React.FC<Props> = ({ onGoToOrder }) => {
                     <div
                       style={{
                         background: '#f8fafc',
-                        padding: '8px 12px',
-                        borderRadius: '8px',
-                        fontSize: '0.85rem',
+                        padding: '10px 12px',
+                        borderRadius: '10px',
+                        fontSize: '0.875rem',
                         marginBottom: '10px',
-                        color: '#334155'
+                        color: '#334155',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '6px'
                       }}
                     >
                       {item.phone && (
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                          <Phone size={13} />
-                          電話：<a href={`tel:${item.phone.split('/')[0].trim()}`}>{item.phone}</a>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '6px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <Phone size={14} color="#16a34a" />
+                            <span>電話：{item.phone}</span>
+                          </div>
+                          <button
+                            onClick={() => handlePhoneClick(item.title, item.phone!)}
+                            className="btn btn-sm"
+                            style={{
+                              background: '#16a34a',
+                              color: 'white',
+                              padding: '5px 12px',
+                              fontSize: '0.8rem',
+                              gap: '4px',
+                              borderRadius: '8px'
+                            }}
+                          >
+                            <Phone size={13} />
+                            撥打
+                          </button>
                         </div>
                       )}
-                      {item.hours && <div>營業時間：{item.hours}</div>}
+                      {item.hours && <div style={{ color: '#64748b', fontSize: '0.82rem' }}>🕒 營業時間：{item.hours}</div>}
                     </div>
                   )}
 
@@ -232,6 +317,14 @@ export const ItineraryView: React.FC<Props> = ({ onGoToOrder }) => {
           </div>
         </div>
       ))}
+
+      {callingItem && (
+        <PhoneCallModal
+          title={callingItem.title}
+          phoneString={callingItem.phone}
+          onClose={() => setCallingItem(null)}
+        />
+      )}
     </div>
   );
 };

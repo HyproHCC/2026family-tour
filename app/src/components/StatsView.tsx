@@ -15,8 +15,11 @@ import {
   removeOrder,
   removeDishOrders,
   clearMealOrders,
-  OrderItem
+  OrderItem,
+  getLocalUser
 } from '../store/orderStore';
+import { showToast } from './Toast';
+import { SyncModal } from './SyncModal';
 
 interface Props {
   selectedMealKey: string;
@@ -30,6 +33,7 @@ export const StatsView: React.FC<Props> = ({
   onGoToOrder
 }) => {
   const [copied, setCopied] = useState(false);
+  const [syncModalOpen, setSyncModalOpen] = useState(false);
   const currentMeal = MEALS_DATA.find((m) => m.dateKey === selectedMealKey) || MEALS_DATA[0];
   const allOrders = useOrders();
   const mealOrders = allOrders.filter((o) => o.mealKey === selectedMealKey);
@@ -103,6 +107,7 @@ export const StatsView: React.FC<Props> = ({
 
     navigator.clipboard.writeText(text);
     setCopied(true);
+    showToast('✅ 菜單清單已複製！可直接貼到 LINE 家族群組');
     setTimeout(() => setCopied(false), 2500);
   };
 
@@ -209,32 +214,48 @@ export const StatsView: React.FC<Props> = ({
           </div>
         </div>
 
-        {/* 複製與重設操作列 */}
-        <div style={{ marginTop: '16px', display: 'flex', gap: '8px' }}>
-          <button
-            onClick={handleCopySummary}
-            className="btn btn-primary"
-            style={{ flex: 1, fontSize: '0.85rem', padding: '8px 12px' }}
-          >
-            {copied ? <Check size={16} /> : <Share2 size={16} />}
-            {copied ? '已複製到剪貼簿！' : '複製菜單清單傳 LINE'}
-          </button>
-          {mealOrders.length > 0 && (
+        {/* 複製、同步與重設操作列 */}
+        <div style={{ marginTop: '16px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          <div style={{ display: 'flex', gap: '8px' }}>
             <button
-              onClick={handleClear}
+              onClick={handleCopySummary}
+              className="btn btn-primary"
+              style={{ flex: 1, fontSize: '0.85rem', padding: '8px 12px' }}
+            >
+              {copied ? <Check size={16} /> : <Share2 size={16} />}
+              {copied ? '已複製到剪貼簿！' : '複製菜單清單傳 LINE'}
+            </button>
+            <button
+              onClick={() => setSyncModalOpen(true)}
               className="btn btn-outline"
               style={{
-                background: 'rgba(239, 68, 68, 0.2)',
-                borderColor: '#ef4444',
-                color: '#fca5a5',
                 fontSize: '0.85rem',
-                padding: '8px 12px'
+                padding: '8px 12px',
+                background: 'rgba(255, 255, 255, 0.1)',
+                borderColor: 'rgba(255, 255, 255, 0.2)',
+                color: 'white'
               }}
+              title="雲端同步與匯入家人點餐碼"
             >
-              <Trash2 size={15} />
-              清空
+              點餐碼/同步
             </button>
-          )}
+            {mealOrders.length > 0 && (
+              <button
+                onClick={handleClear}
+                className="btn btn-outline"
+                style={{
+                  background: 'rgba(239, 68, 68, 0.2)',
+                  borderColor: '#ef4444',
+                  color: '#fca5a5',
+                  fontSize: '0.85rem',
+                  padding: '8px 12px'
+                }}
+              >
+                <Trash2 size={15} />
+                清空
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
@@ -459,6 +480,13 @@ export const StatsView: React.FC<Props> = ({
             })}
           </div>
         </div>
+      )}
+
+      {syncModalOpen && (
+        <SyncModal
+          currentUser={getLocalUser()}
+          onClose={() => setSyncModalOpen(false)}
+        />
       )}
     </div>
   );

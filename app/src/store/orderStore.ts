@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { pushOrdersToCloud } from '../services/syncService';
 
 export interface OrderItem {
   id: string; // unique order id
@@ -77,6 +78,8 @@ export function saveOrders(orders: OrderItem[]): void {
     console.error('Failed to save to localStorage', err);
   }
   notify();
+  // 若有開啟雲端同步，非同步推送至雲端
+  pushOrdersToCloud(globalOrders).catch(() => {});
 }
 
 export function useOrders(): OrderItem[] {

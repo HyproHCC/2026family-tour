@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Calendar, Utensils, PieChart, UserCheck, Sparkles, MapPin } from 'lucide-react';
+import { Calendar, Utensils, PieChart, UserCheck, MapPin } from 'lucide-react';
 import { ItineraryView } from './components/ItineraryView';
 import { OrderView } from './components/OrderView';
 import { StatsView } from './components/StatsView';
@@ -8,26 +8,18 @@ import { getLocalUser, setLocalUser } from './store/orderStore';
 
 export function App() {
   const [activeTab, setActiveTab] = useState<'itinerary' | 'order' | 'stats'>('itinerary');
-  const [currentUser, setCurrentUser] = useState<string>('');
-  const [userModalOpen, setUserModalOpen] = useState(false);
+  const [currentUser, setCurrentUser] = useState<string>(() => getLocalUser());
+  const [userModalOpen, setUserModalOpen] = useState(() => !getLocalUser());
   const [selectedMealKey, setSelectedMealKey] = useState<string>('1031_lunch');
 
-  // 初始化取得使用者
   useEffect(() => {
-    const user = getLocalUser();
-    if (user) {
-      setCurrentUser(user);
-    } else {
-      // 首次進入如果沒有人，彈窗引導選擇
-      setUserModalOpen(true);
-    }
-
-    // 監聽 storage 跨組件/標籤頁變更
-    const handleUpdate = () => {
-      // trigger rerender
+    const handleStorage = (e: StorageEvent) => {
+      if (e.key === 'family_trip_current_user_v1') {
+        setCurrentUser(getLocalUser());
+      }
     };
-    window.addEventListener('orders_updated', handleUpdate);
-    return () => window.removeEventListener('orders_updated', handleUpdate);
+    window.addEventListener('storage', handleStorage);
+    return () => window.removeEventListener('storage', handleStorage);
   }, []);
 
   const handleSelectUser = (name: string) => {

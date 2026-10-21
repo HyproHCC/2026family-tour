@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { User, Check, Sparkles } from 'lucide-react';
+import { User, Check } from 'lucide-react';
 import { DEFAULT_MEMBERS } from '../data/tripData';
 
 interface Props {

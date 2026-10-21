@@ -1,17 +1,16 @@
 import React, { useState } from 'react';
 import {
-  Utensils,
   Plus,
   Minus,
-  Check,
-  AlertCircle,
   Image as ImageIcon,
   Flame,
   Search,
-  Users
+  Users,
+  ChevronDown,
+  ChevronUp
 } from 'lucide-react';
-import { MEALS_DATA, MealInfo, DishItem } from '../data/tripData';
-import { addOrder, getOrders, OrderItem } from '../store/orderStore';
+import { MEALS_DATA, DishItem } from '../data/tripData';
+import { addOrder, useOrders, updateOrderQty, getLocalUser } from '../store/orderStore';
 import confetti from 'canvas-confetti';
 
 interface Props {
@@ -32,6 +31,7 @@ export const OrderView: React.FC<Props> = ({
   const [activeCategory, setActiveCategory] = useState<string>('全部');
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [previewImage, setPreviewImage] = useState<string | null>(null);
+  const [showLiveSummary, setShowLiveSummary] = useState(true);
 
   // 火鍋客製化彈窗狀態
   const [hotpotModalOpen, setHotpotModalOpen] = useState(false);
@@ -40,7 +40,7 @@ export const OrderView: React.FC<Props> = ({
   const [selectedSide, setSelectedSide] = useState<string>('白飯');
 
   const currentMeal = MEALS_DATA.find((m) => m.dateKey === selectedMealKey) || MEALS_DATA[0];
-  const allOrders = getOrders();
+  const allOrders = useOrders();
   const currentMealOrders = allOrders.filter((o) => o.mealKey === selectedMealKey);
   const myMealOrders = currentMealOrders.filter((o) => o.userName === currentUser);
 
@@ -54,13 +54,14 @@ export const OrderView: React.FC<Props> = ({
   });
 
   const handleAddDish = (dish: DishItem) => {
-    if (!currentUser) {
+    const user = currentUser || getLocalUser();
+    if (!user) {
       onRequestUser();
       return;
     }
     addOrder({
       mealKey: selectedMealKey,
-      userName: currentUser,
+      userName: user,
       itemId: dish.id,
       itemName: dish.name,
       price: dish.price,
@@ -68,11 +69,23 @@ export const OrderView: React.FC<Props> = ({
       details: dish.note ? `備註: ${dish.note}` : undefined
     });
 
-    confetti({
-      particleCount: 25,
-      spread: 40,
-      origin: { y: 0.85 }
-    });
+    try {
+      confetti({
+        particleCount: 25,
+        spread: 40,
+        origin: { y: 0.85 }
+      });
+    } catch {
+      // ignore confetti errors
+    }
+  };
+
+  const handleDecreaseDish = (dishId: string) => {
+    const user = currentUser || getLocalUser();
+    const target = currentMealOrders.slice().reverse().find((o) => o.userName === user && o.itemId === dishId);
+    if (target) {
+      updateOrderQty(target.id, -1);
+    }
   };
 
   const handleConfirmHotpot = () => {
@@ -99,6 +112,37 @@ export const OrderView: React.FC<Props> = ({
       origin: { y: 0.85 }
     });
   };
+
+  // 依菜品彙總即時點菜結果
+  interface DishGroup {
+    itemName: string;
+    totalQty: number;
+    orderedBy: { [userName: string]: number };
+    detailsList: string[];
+  }
+  const liveSummaryMap: { [key: string]: DishGroup } = {};
+  currentMealOrders.forEach((o) => {
+    const key = o.itemId + (o.details ? `_${o.details}` : '');
+    if (!liveSummaryMap[key]) {
+      liveSummaryMap[key] = {
+        itemName: o.itemName,
+        totalQty: 0,
+        orderedBy: {},
+        detailsList: []
+      };
+    }
+    liveSummaryMap[key].totalQty += o.quantity;
+    liveSummaryMap[key].orderedBy[o.userName] = (liveSummaryMap[key].orderedBy[o.userName] || 0) + o.quantity;
+    if (o.details && !liveSummaryMap[key].detailsList.includes(o.details)) {
+      liveSummaryMap[key].detailsList.push(o.details);
+    }
+  });
+  const liveSummaries = Object.values(liveSummaryMap);
+
+  // 金額計算（無小數點）
+  const totalSubtotal = currentMealOrders.reduce((sum, o) => sum + o.price * o.quantity, 0);
+  const serviceRate = (currentMeal.serviceChargePercent || 0) / 100;
+  const grandTotal = Math.round(totalSubtotal * (1 + serviceRate));
 
   return (
     <div>
@@ -225,6 +269,82 @@ export const OrderView: React.FC<Props> = ({
         </div>
       </div>
 
+      {/* 即時整桌點菜看板 (需求三：能在菜單上即時看到其它點菜結果) */}
+      {currentMealOrders.length > 0 && (
+        <div
+          className="card"
+          style={{
+            background: '#f8fafc',
+            border: '1px solid #cbd5e1',
+            padding: '12px 14px',
+            marginBottom: '16px'
+          }}
+        >
+          <div
+            onClick={() => setShowLiveSummary(!showLiveSummary)}
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              cursor: 'pointer',
+              userSelect: 'none'
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <Users size={18} color="#2563eb" />
+              <span style={{ fontWeight: 700, fontSize: '0.92rem', color: '#1e293b' }}>
+                即時整桌點菜動態（已點 {currentMealOrders.reduce((sum, o) => sum + o.quantity, 0)} 份，共 ${grandTotal}）
+              </span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '4px', color: '#64748b', fontSize: '0.8rem' }}>
+              <span>{showLiveSummary ? '收合' : '展開查看'}</span>
+              {showLiveSummary ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+            </div>
+          </div>
+
+          {showLiveSummary && (
+            <div style={{ marginTop: '12px', borderTop: '1px solid #e2e8f0', paddingTop: '10px' }}>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                {liveSummaries.map((item, idx) => {
+                  const whoList = Object.entries(item.orderedBy)
+                    .map(([u, q]) => `${u}x${q}`)
+                    .join(', ');
+                  return (
+                    <div
+                      key={idx}
+                      style={{
+                        background: 'white',
+                        border: '1px solid #e2e8f0',
+                        borderRadius: '8px',
+                        padding: '6px 10px',
+                        fontSize: '0.8rem',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px'
+                      }}
+                    >
+                      <span style={{ fontWeight: 700, color: '#0f172a' }}>{item.itemName}</span>
+                      <span
+                        style={{
+                          background: '#eff6ff',
+                          color: '#2563eb',
+                          fontWeight: 700,
+                          borderRadius: '4px',
+                          padding: '1px 5px'
+                        }}
+                      >
+                        x{item.totalQty}
+                      </span>
+                      <span style={{ color: '#64748b', fontSize: '0.75rem' }}>({whoList})</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* 依餐點類型分別呈現 UI */}
       {currentMeal.hotpot ? (
         /* 火鍋模式 */
@@ -241,6 +361,7 @@ export const OrderView: React.FC<Props> = ({
             {currentMeal.hotpot.meats.map((meat) => {
               const myCount = myMealOrders.filter((o) => o.itemId === meat.id).reduce((sum, o) => sum + o.quantity, 0);
               const totalCount = currentMealOrders.filter((o) => o.itemId === meat.id).reduce((sum, o) => sum + o.quantity, 0);
+              const meatOrders = currentMealOrders.filter((o) => o.itemId === meat.id);
 
               return (
                 <div
@@ -258,12 +379,48 @@ export const OrderView: React.FC<Props> = ({
                     <div style={{ fontSize: '1.1rem', fontWeight: 700, color: '#dc2626', marginTop: '4px' }}>
                       ${meat.price}
                     </div>
+
+                    {/* 即時顯示誰點了這份火鍋 (需求三) */}
+                    <div style={{ marginTop: '10px' }}>
+                      {totalCount > 0 ? (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                          <div style={{ fontSize: '0.75rem', fontWeight: 700, color: '#475569' }}>
+                            整桌已點 {totalCount} 份：
+                          </div>
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+                            {meatOrders.map((ord) => {
+                              const isMe = ord.userName === currentUser;
+                              return (
+                                <div
+                                  key={ord.id}
+                                  style={{
+                                    fontSize: '0.72rem',
+                                    background: isMe ? '#eff6ff' : '#f8fafc',
+                                    color: isMe ? '#1d4ed8' : '#334155',
+                                    border: isMe ? '1px solid #bfdbfe' : '1px solid #e2e8f0',
+                                    borderRadius: '6px',
+                                    padding: '3px 6px',
+                                    lineHeight: 1.3
+                                  }}
+                                >
+                                  <strong>{ord.userName}</strong> x{ord.quantity}
+                                  {ord.details && (
+                                    <div style={{ color: '#64748b', fontSize: '0.7rem' }}>
+                                      {ord.details}
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      ) : (
+                        <span style={{ fontSize: '0.75rem', color: '#94a3b8' }}>尚未有人點選</span>
+                      )}
+                    </div>
                   </div>
 
-                  <div style={{ marginTop: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <div style={{ fontSize: '0.75rem', color: '#64748b' }}>
-                      {totalCount > 0 ? `整桌共已點 ${totalCount} 份` : '尚未有人點選'}
-                    </div>
+                  <div style={{ marginTop: '12px', display: 'flex', justifyContent: 'flex-end', alignItems: 'center' }}>
                     <button
                       className="btn btn-primary btn-sm"
                       onClick={() => {
@@ -272,7 +429,7 @@ export const OrderView: React.FC<Props> = ({
                       }}
                     >
                       <Plus size={14} />
-                      選擇湯底與副食 ({myCount > 0 ? `我點了 ${myCount}` : '點餐'})
+                      選擇湯底與副食 {myCount > 0 ? `(我已點 ${myCount})` : ''}
                     </button>
                   </div>
                 </div>
@@ -340,7 +497,14 @@ export const OrderView: React.FC<Props> = ({
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
             {filteredDishes.map((dish) => {
               const myCount = myMealOrders.filter((o) => o.itemId === dish.id).reduce((sum, o) => sum + o.quantity, 0);
-              const totalCount = currentMealOrders.filter((o) => o.itemId === dish.id).reduce((sum, o) => sum + o.quantity, 0);
+              const dishOrders = currentMealOrders.filter((o) => o.itemId === dish.id);
+              const totalCount = dishOrders.reduce((sum, o) => sum + o.quantity, 0);
+
+              // 統計這道菜有哪些成員點了幾份
+              const userQuantities: { [userName: string]: number } = {};
+              dishOrders.forEach((o) => {
+                userQuantities[o.userName] = (userQuantities[o.userName] || 0) + o.quantity;
+              });
 
               return (
                 <div
@@ -356,7 +520,7 @@ export const OrderView: React.FC<Props> = ({
                   }}
                 >
                   <div style={{ flex: 1 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
                       <span style={{ fontWeight: 700, fontSize: '0.95rem' }}>{dish.name}</span>
                       {dish.isVegetarian && (
                         <span style={{ fontSize: '0.7rem', background: '#dcfce7', color: '#15803d', padding: '2px 6px', borderRadius: '4px' }}>
@@ -374,29 +538,105 @@ export const OrderView: React.FC<Props> = ({
                         ${dish.price}
                       </span>
                       {dish.unit && <span style={{ fontSize: '0.75rem', color: '#64748b' }}>/{dish.unit}</span>}
-                      {totalCount > 0 && (
-                        <span style={{ fontSize: '0.75rem', color: '#64748b', background: '#f1f5f9', padding: '2px 6px', borderRadius: '6px' }}>
-                          全家已點 {totalCount} 份
-                        </span>
-                      )}
                     </div>
+
+                    {/* 即時顯示誰點了這道菜 (需求三) */}
+                    {totalCount > 0 ? (
+                      <div style={{ marginTop: '6px', display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '4px' }}>
+                        <span style={{ fontSize: '0.75rem', fontWeight: 600, color: '#475569' }}>
+                          全家已點 {totalCount} 份：
+                        </span>
+                        {Object.entries(userQuantities).map(([user, qty]) => {
+                          const isMe = user === currentUser;
+                          return (
+                            <span
+                              key={user}
+                              style={{
+                                fontSize: '0.75rem',
+                                padding: '1px 7px',
+                                borderRadius: '6px',
+                                background: isMe ? '#dbeafe' : '#f1f5f9',
+                                color: isMe ? '#1d4ed8' : '#334155',
+                                border: isMe ? '1px solid #bfdbfe' : '1px solid #e2e8f0',
+                                fontWeight: isMe ? 700 : 500
+                              }}
+                            >
+                              {user} x{qty}
+                            </span>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <div style={{ fontSize: '0.75rem', color: '#94a3b8', marginTop: '4px' }}>
+                        尚未有人點選
+                      </div>
+                    )}
                   </div>
 
-                  {/* 加點按鈕 */}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    {myCount > 0 && (
-                      <span style={{ fontSize: '0.85rem', fontWeight: 700, color: '#16a34a' }}>
-                        我: {myCount}
-                      </span>
+                  {/* 加減點按鈕 */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    {myCount > 0 ? (
+                      <div
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          background: '#f1f5f9',
+                          borderRadius: '20px',
+                          padding: '2px 4px',
+                          border: '1px solid #cbd5e1'
+                        }}
+                      >
+                        <button
+                          onClick={() => handleDecreaseDish(dish.id)}
+                          style={{
+                            border: 'none',
+                            background: 'white',
+                            borderRadius: '50%',
+                            width: '28px',
+                            height: '28px',
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            color: '#475569',
+                            boxShadow: '0 1px 2px rgba(0,0,0,0.05)'
+                          }}
+                          title="減少一份"
+                        >
+                          <Minus size={14} />
+                        </button>
+                        <span style={{ fontWeight: 700, minWidth: '24px', textAlign: 'center', fontSize: '0.85rem', color: '#16a34a' }}>
+                          {myCount}
+                        </span>
+                        <button
+                          onClick={() => handleAddDish(dish)}
+                          style={{
+                            border: 'none',
+                            background: '#2563eb',
+                            color: 'white',
+                            borderRadius: '50%',
+                            width: '28px',
+                            height: '28px',
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center'
+                          }}
+                          title="增加一份"
+                        >
+                          <Plus size={14} />
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        className="btn btn-primary btn-sm"
+                        onClick={() => handleAddDish(dish)}
+                        style={{ borderRadius: '50%', width: '36px', height: '36px', padding: 0 }}
+                        title="加一份"
+                      >
+                        <Plus size={18} />
+                      </button>
                     )}
-                    <button
-                      className="btn btn-primary btn-sm"
-                      onClick={() => handleAddDish(dish)}
-                      style={{ borderRadius: '50%', width: '36px', height: '36px', padding: 0 }}
-                      title="加一份"
-                    >
-                      <Plus size={18} />
-                    </button>
                   </div>
                 </div>
               );
@@ -405,7 +645,7 @@ export const OrderView: React.FC<Props> = ({
         </div>
       )}
 
-      {/* 底部浮動快速統計 Bar */}
+      {/* 底部浮動快速統計 Bar (需求二：金額無小數點) */}
       {currentMealOrders.length > 0 && (
         <div
           style={{
@@ -420,7 +660,8 @@ export const OrderView: React.FC<Props> = ({
             boxShadow: '0 8px 24px rgba(0,0,0,0.25)',
             display: 'flex',
             alignItems: 'center',
-            justifyContent: 'space-between'
+            justifyContent: 'space-between',
+            zIndex: 10
           }}
         >
           <div>
@@ -428,9 +669,7 @@ export const OrderView: React.FC<Props> = ({
               此餐共點了 {currentMealOrders.reduce((sum, o) => sum + o.quantity, 0)} 道菜
             </div>
             <div style={{ fontSize: '1.1rem', fontWeight: 700 }}>
-              總計：$
-              {currentMealOrders.reduce((sum, o) => sum + o.price * o.quantity, 0) *
-                (1 + (currentMeal.serviceChargePercent || 0) / 100)}
+              總計：${grandTotal}
               {currentMeal.serviceChargePercent && (
                 <span style={{ fontSize: '0.75rem', fontWeight: 400, color: '#cbd5e1', marginLeft: '4px' }}>
                   (含10%服務費)
@@ -451,7 +690,7 @@ export const OrderView: React.FC<Props> = ({
               cursor: 'pointer'
             }}
           >
-            查看明細與統計 →
+            查看明細與編輯 →
           </button>
         </div>
       )}

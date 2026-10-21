@@ -1,3 +1,5 @@
+import { useState, useEffect } from 'react';
+
 export interface OrderItem {
   id: string; // unique order id
   mealKey: string; // '1031_lunch' | '1031_dinner' | '1101_lunch'
@@ -14,35 +16,104 @@ const STORAGE_ORDERS_KEY = 'family_trip_orders_v1';
 const STORAGE_USER_KEY = 'family_trip_current_user_v1';
 
 export function getLocalUser(): string {
-  return localStorage.getItem(STORAGE_USER_KEY) || '';
+  const user = localStorage.getItem(STORAGE_USER_KEY) || '';
+  if (!user || user === '阿明') {
+    localStorage.setItem(STORAGE_USER_KEY, '五妹');
+    return '五妹';
+  }
+  return user;
 }
 
 export function setLocalUser(name: string): void {
-  localStorage.setItem(STORAGE_USER_KEY, name.trim());
+  const trimmed = name.trim() || '五妹';
+  localStorage.setItem(STORAGE_USER_KEY, trimmed);
 }
 
-export function getOrders(): OrderItem[] {
+function getOrdersFromStorage(): OrderItem[] {
   try {
     const raw = localStorage.getItem(STORAGE_ORDERS_KEY);
-    return raw ? JSON.parse(raw) : [];
+    if (!raw) return [];
+    const list: OrderItem[] = JSON.parse(raw);
+    let changed = false;
+    const migrated = list.map((item) => {
+      if (item.userName === '阿明') {
+        changed = true;
+        return { ...item, userName: '五妹' };
+      }
+      return item;
+    });
+    if (changed) {
+      localStorage.setItem(STORAGE_ORDERS_KEY, JSON.stringify(migrated));
+    }
+    return migrated;
   } catch {
     return [];
   }
 }
 
+// 全域記憶體狀態與訂閱清單，確保按下去「立即無延遲更新」
+let globalOrders: OrderItem[] = getOrdersFromStorage();
+const listeners = new Set<(orders: OrderItem[]) => void>();
+
+function notify() {
+  const snapshot = [...globalOrders];
+  listeners.forEach((fn) => fn(snapshot));
+  try {
+    window.dispatchEvent(new Event('orders_updated'));
+  } catch {
+    // ignore
+  }
+}
+
+export function getOrders(): OrderItem[] {
+  return [...globalOrders];
+}
+
 export function saveOrders(orders: OrderItem[]): void {
-  localStorage.setItem(STORAGE_ORDERS_KEY, JSON.stringify(orders));
-  // dispatch custom event for cross-component sync
-  window.dispatchEvent(new Event('orders_updated'));
+  globalOrders = [...orders];
+  try {
+    localStorage.setItem(STORAGE_ORDERS_KEY, JSON.stringify(globalOrders));
+  } catch (err) {
+    console.error('Failed to save to localStorage', err);
+  }
+  notify();
+}
+
+export function useOrders(): OrderItem[] {
+  const [orders, setOrders] = useState<OrderItem[]>(() => [...globalOrders]);
+
+  useEffect(() => {
+    const handler = (newOrders: OrderItem[]) => {
+      setOrders(newOrders);
+    };
+    listeners.add(handler);
+
+    // 跨分頁監聽
+    const handleStorage = (e: StorageEvent) => {
+      if (e.key === STORAGE_ORDERS_KEY) {
+        globalOrders = getOrdersFromStorage();
+        notify();
+      }
+    };
+    window.addEventListener('storage', handleStorage);
+
+    return () => {
+      listeners.delete(handler);
+      window.removeEventListener('storage', handleStorage);
+    };
+  }, []);
+
+  return orders;
 }
 
 export function addOrder(item: Omit<OrderItem, 'id' | 'timestamp'>): void {
   const current = getOrders();
-  // check if matching existing item for this user & meal
+  const userName = item.userName || getLocalUser();
+
   const existingIdx = current.findIndex(
     (o) =>
       o.mealKey === item.mealKey &&
-      o.userName === item.userName &&
+      o.userName === userName &&
       o.itemId === item.itemId &&
       (o.details || '') === (item.details || '')
   );
@@ -52,7 +123,8 @@ export function addOrder(item: Omit<OrderItem, 'id' | 'timestamp'>): void {
   } else {
     current.push({
       ...item,
-      id: 'ord_' + Math.random().toString(36).substring(2, 9),
+      userName,
+      id: 'ord_' + Date.now().toString(36) + '_' + Math.random().toString(36).substring(2, 6),
       timestamp: Date.now()
     });
   }
@@ -73,6 +145,18 @@ export function updateOrderQty(id: string, delta: number): void {
 
 export function removeOrder(id: string): void {
   const current = getOrders().filter((o) => o.id !== id);
+  saveOrders(current);
+}
+
+export function removeDishOrders(mealKey: string, itemId: string, details?: string): void {
+  const current = getOrders().filter(
+    (o) =>
+      !(
+        o.mealKey === mealKey &&
+        o.itemId === itemId &&
+        (details === undefined || (o.details || '') === details)
+      )
+  );
   saveOrders(current);
 }
 

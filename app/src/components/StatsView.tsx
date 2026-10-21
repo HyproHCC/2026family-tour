@@ -1,20 +1,19 @@
 import React, { useState } from 'react';
 import {
-  Users,
   UtensilsCrossed,
   Trash2,
   Plus,
   Minus,
-  Calculator,
   Share2,
   Check,
-  AlertCircle
+  Edit3
 } from 'lucide-react';
-import { MEALS_DATA, MealInfo } from '../data/tripData';
+import { MEALS_DATA } from '../data/tripData';
 import {
-  getOrders,
+  useOrders,
   updateOrderQty,
   removeOrder,
+  removeDishOrders,
   clearMealOrders,
   OrderItem
 } from '../store/orderStore';
@@ -32,17 +31,20 @@ export const StatsView: React.FC<Props> = ({
 }) => {
   const [copied, setCopied] = useState(false);
   const currentMeal = MEALS_DATA.find((m) => m.dateKey === selectedMealKey) || MEALS_DATA[0];
-  const allOrders = getOrders();
+  const allOrders = useOrders();
   const mealOrders = allOrders.filter((o) => o.mealKey === selectedMealKey);
 
-  // 1. 依「菜品」彙總統計 (整桌清單)
+  // 依「菜品」彙總統計 (整桌清單)
   interface DishSummary {
+    key: string;
     itemId: string;
     itemName: string;
     price: number;
     totalQty: number;
-    orderedBy: { [userName: string]: number };
     detailsList: string[];
+    details?: string;
+    orders: OrderItem[];
+    orderedBy: { [userName: string]: number };
   }
 
   const dishMap: { [key: string]: DishSummary } = {};
@@ -50,15 +52,19 @@ export const StatsView: React.FC<Props> = ({
     const key = o.itemId + (o.details ? `_${o.details}` : '');
     if (!dishMap[key]) {
       dishMap[key] = {
+        key,
         itemId: o.itemId,
         itemName: o.itemName,
         price: o.price,
         totalQty: 0,
-        orderedBy: {},
-        detailsList: []
+        detailsList: [],
+        details: o.details,
+        orders: [],
+        orderedBy: {}
       };
     }
     dishMap[key].totalQty += o.quantity;
+    dishMap[key].orders.push(o);
     dishMap[key].orderedBy[o.userName] = (dishMap[key].orderedBy[o.userName] || 0) + o.quantity;
     if (o.details && !dishMap[key].detailsList.includes(o.details)) {
       dishMap[key].detailsList.push(o.details);
@@ -67,40 +73,13 @@ export const StatsView: React.FC<Props> = ({
 
   const dishSummaries = Object.values(dishMap);
 
-  // 2. 依「個人」統計金額
-  interface UserSummary {
-    userName: string;
-    items: { itemName: string; price: number; quantity: number; details?: string }[];
-    subtotal: number;
-  }
-
-  const userMap: { [name: string]: UserSummary } = {};
-  mealOrders.forEach((o) => {
-    if (!userMap[o.userName]) {
-      userMap[o.userName] = {
-        userName: o.userName,
-        items: [],
-        subtotal: 0
-      };
-    }
-    userMap[o.userName].items.push({
-      itemName: o.itemName,
-      price: o.price,
-      quantity: o.quantity,
-      details: o.details
-    });
-    userMap[o.userName].subtotal += o.price * o.quantity;
-  });
-
-  const userSummaries = Object.values(userMap);
-
-  // 金額計算
-  const subtotal = mealOrders.reduce((sum, o) => sum + o.price * o.quantity, 0);
+  // 金額計算（無小數點）
+  const subtotal = Math.round(mealOrders.reduce((sum, o) => sum + o.price * o.quantity, 0));
   const serviceChargeRate = (currentMeal.serviceChargePercent || 0) / 100;
   const serviceCharge = Math.round(subtotal * serviceChargeRate);
-  const grandTotal = subtotal + serviceCharge;
+  const grandTotal = Math.round(subtotal + serviceCharge);
 
-  // 複製文字清單分享到 LINE / 家族群組
+  // 複製文字清單分享到 LINE / 家族群組（無個人金額統計，無小數點）
   const handleCopySummary = () => {
     let text = `【${currentMeal.restaurant}】家族點餐統計\n`;
     text += `用餐時段：${currentMeal.timing}\n\n`;
@@ -120,13 +99,7 @@ export const StatsView: React.FC<Props> = ({
     if (serviceCharge > 0) {
       text += `服務費(10%)：$${serviceCharge}\n`;
     }
-    text += `總計金額：$${grandTotal}\n\n`;
-
-    text += `👤【每人明細】\n`;
-    userSummaries.forEach((u) => {
-      const personalWithTax = Math.round(u.subtotal * (1 + serviceChargeRate));
-      text += `• ${u.userName}：$${personalWithTax} (${u.items.map((i) => i.itemName + 'x' + i.quantity).join('、')})\n`;
-    });
+    text += `總計金額：$${grandTotal}\n`;
 
     navigator.clipboard.writeText(text);
     setCopied(true);
@@ -205,7 +178,7 @@ export const StatsView: React.FC<Props> = ({
           </div>
         </div>
 
-        {/* 費用拆解 */}
+        {/* 費用拆解 (無小數點) */}
         <div
           style={{
             marginTop: '16px',
@@ -229,9 +202,9 @@ export const StatsView: React.FC<Props> = ({
             </div>
           </div>
           <div>
-            <div style={{ color: '#94a3b8' }}>已點道數</div>
+            <div style={{ color: '#94a3b8' }}>已點品項</div>
             <div style={{ fontWeight: 700, marginTop: '2px' }}>
-              {dishSummaries.reduce((sum, d) => sum + d.totalQty, 0)} 道
+              {dishSummaries.reduce((sum, d) => sum + d.totalQty, 0)} 份
             </div>
           </div>
         </div>
@@ -244,7 +217,7 @@ export const StatsView: React.FC<Props> = ({
             style={{ flex: 1, fontSize: '0.85rem', padding: '8px 12px' }}
           >
             {copied ? <Check size={16} /> : <Share2 size={16} />}
-            {copied ? '已複製到剪貼簿！' : '複製文字清單傳 LINE'}
+            {copied ? '已複製到剪貼簿！' : '複製菜單清單傳 LINE'}
           </button>
           {mealOrders.length > 0 && (
             <button
@@ -259,7 +232,7 @@ export const StatsView: React.FC<Props> = ({
               }}
             >
               <Trash2 size={15} />
-              清空重置
+              清空
             </button>
           )}
         </div>
@@ -283,203 +256,209 @@ export const StatsView: React.FC<Props> = ({
           </button>
         </div>
       ) : (
-        <>
-          {/* 整桌出菜明細表 */}
-          <div style={{ marginBottom: '24px' }}>
+        /* 最後菜單編輯與點單總表 (需求四：不需要個人金額統計；需求五：最後菜單具備編輯功能) */
+        <div style={{ marginBottom: '24px' }}>
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              marginBottom: '10px'
+            }}
+          >
             <h4
               style={{
                 fontSize: '1rem',
                 fontWeight: 700,
-                marginBottom: '10px',
                 display: 'flex',
                 alignItems: 'center',
-                gap: '6px'
+                gap: '6px',
+                margin: 0
               }}
             >
-              📋 整桌向店家點單總表 ({dishSummaries.length} 種品項)
+              <Edit3 size={18} color="#2563eb" />
+              最後點單菜單編輯（共 {dishSummaries.length} 種品項、{mealOrders.reduce((sum, o) => sum + o.quantity, 0)} 份）
             </h4>
+            <span style={{ fontSize: '0.75rem', color: '#64748b' }}>
+              可在此增減數量或刪除品項
+            </span>
+          </div>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              {dishSummaries.map((dish, idx) => (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            {dishSummaries.map((dish) => {
+              const dishTotalAmount = Math.round(dish.price * dish.totalQty);
+
+              return (
                 <div
-                  key={idx}
+                  key={dish.key}
                   className="card"
                   style={{
-                    padding: '12px 14px',
+                    padding: '14px',
                     margin: 0,
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'flex-start'
+                    border: '1px solid #e2e8f0'
                   }}
                 >
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontWeight: 700, fontSize: '0.95rem' }}>
-                      {dish.itemName}
-                    </div>
-                    {dish.detailsList.length > 0 && (
-                      <div style={{ fontSize: '0.8rem', color: '#475569', marginTop: '2px' }}>
-                        {dish.detailsList.join(' / ')}
+                  {/* 品項標題與總計 */}
+                  <div
+                    style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'flex-start',
+                      paddingBottom: '8px',
+                      borderBottom: '1px solid #f1f5f9'
+                    }}
+                  >
+                    <div>
+                      <div style={{ fontWeight: 700, fontSize: '1rem', color: '#0f172a' }}>
+                        {dish.itemName}
                       </div>
-                    )}
-                    <div style={{ fontSize: '0.75rem', color: '#64748b', marginTop: '4px' }}>
-                      誰點的：
-                      {Object.entries(dish.orderedBy).map(([user, q]) => (
-                        <span
-                          key={user}
-                          style={{
-                            display: 'inline-block',
-                            background: '#eff6ff',
-                            color: '#1d4ed8',
-                            padding: '1px 6px',
-                            borderRadius: '4px',
-                            marginRight: '4px',
-                            fontWeight: 600
-                          }}
-                        >
-                          {user} x{q}
-                        </span>
-                      ))}
+                      {dish.details && (
+                        <div style={{ fontSize: '0.8rem', color: '#2563eb', marginTop: '2px', fontWeight: 500 }}>
+                          {dish.details}
+                        </div>
+                      )}
+                      <div style={{ fontSize: '0.8rem', color: '#64748b', marginTop: '2px' }}>
+                        單價：${dish.price}
+                      </div>
+                    </div>
+
+                    <div style={{ textAlign: 'right', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                      <div>
+                        <div style={{ fontSize: '1.1rem', fontWeight: 800, color: '#2563eb' }}>
+                          共 {dish.totalQty} 份
+                        </div>
+                        <div style={{ fontSize: '0.85rem', fontWeight: 700, color: '#0f172a' }}>
+                          ${dishTotalAmount}
+                        </div>
+                      </div>
+
+                      {/* 整道菜批次刪除按鈕 */}
+                      <button
+                        onClick={() => {
+                          if (window.confirm(`確定要刪除整道【${dish.itemName}】嗎？`)) {
+                            removeDishOrders(selectedMealKey, dish.itemId, dish.details);
+                          }
+                        }}
+                        style={{
+                          background: '#fef2f2',
+                          border: '1px solid #fecaca',
+                          color: '#dc2626',
+                          borderRadius: '8px',
+                          padding: '6px',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center'
+                        }}
+                        title="刪除此道菜全部點單"
+                      >
+                        <Trash2 size={16} />
+                      </button>
                     </div>
                   </div>
 
-                  <div style={{ textAlign: 'right' }}>
-                    <div style={{ fontSize: '1rem', fontWeight: 800, color: '#2563eb' }}>
-                      x {dish.totalQty}
-                    </div>
-                    <div style={{ fontSize: '0.8rem', color: '#64748b' }}>
-                      ${dish.price * dish.totalQty}
-                    </div>
+                  {/* 點餐成員明細與個別數量編輯 / 刪除 (需求五) */}
+                  <div style={{ marginTop: '10px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    {dish.orders.map((ord) => (
+                      <div
+                        key={ord.id}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          background: '#f8fafc',
+                          padding: '6px 10px',
+                          borderRadius: '8px',
+                          fontSize: '0.85rem'
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <span
+                            style={{
+                              fontWeight: 700,
+                              background: '#eff6ff',
+                              color: '#1d4ed8',
+                              padding: '2px 8px',
+                              borderRadius: '6px',
+                              fontSize: '0.8rem'
+                            }}
+                          >
+                            {ord.userName}
+                          </span>
+                          {ord.details && (
+                            <span style={{ fontSize: '0.75rem', color: '#64748b' }}>
+                              ({ord.details})
+                            </span>
+                          )}
+                        </div>
+
+                        {/* 數量增減與單筆刪除 */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <button
+                            onClick={() => updateOrderQty(ord.id, -1)}
+                            style={{
+                              border: '1px solid #cbd5e1',
+                              background: 'white',
+                              borderRadius: '4px',
+                              width: '26px',
+                              height: '26px',
+                              cursor: 'pointer',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              color: '#475569'
+                            }}
+                            title="減少 1 份"
+                          >
+                            <Minus size={13} />
+                          </button>
+                          <span style={{ fontWeight: 700, minWidth: '22px', textAlign: 'center' }}>
+                            {ord.quantity}
+                          </span>
+                          <button
+                            onClick={() => updateOrderQty(ord.id, 1)}
+                            style={{
+                              border: '1px solid #cbd5e1',
+                              background: 'white',
+                              borderRadius: '4px',
+                              width: '26px',
+                              height: '26px',
+                              cursor: 'pointer',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              color: '#475569'
+                            }}
+                            title="增加 1 份"
+                          >
+                            <Plus size={13} />
+                          </button>
+
+                          <button
+                            onClick={() => removeOrder(ord.id)}
+                            style={{
+                              border: 'none',
+                              background: 'transparent',
+                              color: '#94a3b8',
+                              cursor: 'pointer',
+                              padding: '4px',
+                              marginLeft: '4px',
+                              display: 'flex',
+                              alignItems: 'center'
+                            }}
+                            title="刪除此筆點單"
+                          >
+                            <Trash2 size={15} />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 </div>
-              ))}
-            </div>
+              );
+            })}
           </div>
-
-          {/* 各成員個人金額明細 */}
-          <div style={{ marginBottom: '24px' }}>
-            <h4
-              style={{
-                fontSize: '1rem',
-                fontWeight: 700,
-                marginBottom: '10px',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px'
-              }}
-            >
-              <Users size={18} color="#2563eb" />
-              家族成員各自點餐與應分擔金額 ({userSummaries.length} 位成員)
-            </h4>
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-              {userSummaries.map((user) => {
-                const userWithTax = Math.round(user.subtotal * (1 + serviceChargeRate));
-                const userOrders = mealOrders.filter((o) => o.userName === user.userName);
-
-                return (
-                  <div key={user.userName} className="card" style={{ padding: '14px', margin: 0 }}>
-                    <div
-                      style={{
-                        display: 'flex',
-                        justifyContent: 'space-between',
-                        alignItems: 'center',
-                        marginBottom: '8px',
-                        borderBottom: '1px solid #f1f5f9',
-                        paddingBottom: '6px'
-                      }}
-                    >
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <span
-                          style={{
-                            fontWeight: 700,
-                            fontSize: '1rem',
-                            color: '#0f172a',
-                            background: '#f1f5f9',
-                            padding: '3px 10px',
-                            borderRadius: '12px'
-                          }}
-                        >
-                          {user.userName}
-                        </span>
-                        <span style={{ fontSize: '0.8rem', color: '#64748b' }}>
-                          共點了 {user.items.reduce((s, i) => s + i.quantity, 0)} 項
-                        </span>
-                      </div>
-                      <div style={{ fontWeight: 800, fontSize: '1.1rem', color: '#16a34a' }}>
-                        ${userWithTax}
-                      </div>
-                    </div>
-
-                    {/* 明細清單 */}
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                      {userOrders.map((ord) => (
-                        <div
-                          key={ord.id}
-                          style={{
-                            display: 'flex',
-                            justifyContent: 'space-between',
-                            alignItems: 'center',
-                            fontSize: '0.85rem'
-                          }}
-                        >
-                          <div>
-                            <span>{ord.itemName}</span>
-                            {ord.details && (
-                              <span style={{ fontSize: '0.75rem', color: '#64748b', marginLeft: '6px' }}>
-                                ({ord.details})
-                              </span>
-                            )}
-                          </div>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                            <span style={{ color: '#64748b' }}>${ord.price}</span>
-                            {/* 增減與刪除 */}
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                              <button
-                                onClick={() => updateOrderQty(ord.id, -1)}
-                                style={{
-                                  border: '1px solid #cbd5e1',
-                                  background: 'white',
-                                  borderRadius: '4px',
-                                  width: '24px',
-                                  height: '24px',
-                                  cursor: 'pointer',
-                                  display: 'flex',
-                                  alignItems: 'center',
-                                  justifyContent: 'center'
-                                }}
-                              >
-                                <Minus size={12} />
-                              </button>
-                              <span style={{ fontWeight: 700, minWidth: '18px', textAlign: 'center' }}>
-                                {ord.quantity}
-                              </span>
-                              <button
-                                onClick={() => updateOrderQty(ord.id, 1)}
-                                style={{
-                                  border: '1px solid #cbd5e1',
-                                  background: 'white',
-                                  borderRadius: '4px',
-                                  width: '24px',
-                                  height: '24px',
-                                  cursor: 'pointer',
-                                  display: 'flex',
-                                  alignItems: 'center',
-                                  justifyContent: 'center'
-                                }}
-                              >
-                                <Plus size={12} />
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        </>
+        </div>
       )}
     </div>
   );

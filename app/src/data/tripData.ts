@@ -313,5 +313,5 @@ export const MEALS_DATA: MealInfo[] = [
 ];
 
 export const DEFAULT_MEMBERS = [
-  '大姊', '二姊', '三姊', '四姊', '爸爸', '媽媽', '阿明', '小美', '小宇'
+  '大姊', '二姊', '三姊', '四姊', '爸爸', '媽媽', '五妹', '小美', '小宇'
 ];
